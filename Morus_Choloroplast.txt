@@ -37,7 +37,7 @@ $ iqtree2 -s /path/to/output_sequences.fasta --modelomatic -b 1000 -T AUTO
 
 ******************************************************************************************
 
-4. SeqIO for extracting the protein-coding sequences (cds) from GenBank annotated file
+5. SeqIO for extracting the protein-coding sequences (cds) from GenBank annotated file
 
 (bash)
 #write a script extract_cds.py	#cds-coding sequences
@@ -109,14 +109,14 @@ $ python3 extract_cds.py
 
 ******************************************************************************************
 
-5. Using codonW for Codon Usage Analysis
+6. Using codonW for Codon Usage Analysis
 (bash)
 $ conda activate codonw
 $codonw path/to/cds.fasta /path_out/to/result.out  
 
 ******************************************************************************************
 
-6. Rcode used for the regression analysis between ecological factors and haplotype diversity
+7. Rcode used for the regression analysis between ecological factors and haplotype diversity
 ## Loading the excel file
 (R)
 library(readxl)
