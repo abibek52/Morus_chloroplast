@@ -1,0 +1,245 @@
+*******************Codes/Scripts used Morus chloroplast genome study**********************
+******************************************************************************************
+1. Quality control of the raw data
+(bash)
+
+# using FastQC
+$ module load fastqc
+$ fastqc /path/to/S1_R1.fastq /path/to/S1_R2.fastq	#R1 and R2 represents the Pair-ended reads for sample S1
+
+# using Trimmomatic to trim adapter and low quality bases
+$ module load trimmomatic
+$ trimmomatic PE -phred33 -trimlog /out_path/to/S1_trimlog -summary /out_path/to/S1_summary /path/to/S1_R1.fastq.gz /path/to/S2_R2.fastq.gz /path/to/S1_R1_pair /path/to/S1_R1_unpair /path/to/S1_R2_pair /path/to/S1_R2_unpair ILLUMINACLIP:TruSeq2-PE.fa:2:30:10:2:True LEADING:3 TRAILING:3 MINLEN:36
+
+# Multiqc 
+$ module load multiqc
+$ multiqc .
+
+******************************************************************************************
+
+2. Assembly of chloroplast genome using Get Organelle
+(bash)
+$ srun -N1 -c30 --time=14-00:00:0 --partition=compute --pty bash #srun to allocate more resources
+$ conda activate get_organelle
+$ get_organelle_from_reads.py -s /path/to/.GetOrganelle/SeedDatabase/seed.fasta -1 S1_R1_pair -2 S2_R2_pair -o /out_path/to/S1_plastome -R 20 -F embplant_pt 
+
+******************************************************************************************
+
+3. Multiple sequence alignment using MAFFT
+$ module load mafft
+$ mafft /path/to/input_sequences.fasta > /path_out/to/output_sequences.fasta
+
+******************************************************************************************
+4. Phylogenetic Analysis using Iqtree for MAFFT-aligned sequences with 1000 bootstrap replicates
+(bash)
+$ module load iqtree
+$ iqtree2 -s /path/to/output_sequences.fasta --modelomatic -b 1000 -T AUTO
+
+******************************************************************************************
+
+4. SeqIO for extracting the protein-coding sequences (cds) from GenBank annotated file
+
+(bash)
+#write a script extract_cds.py	#cds-coding sequences
+$ nano extract_cds.py
+
+(python)
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
+
+# Function to remove stop codons from a nucleotide sequence
+def remove_stop_codons(sequence):
+    stop_codons = ["TAA", "TAG", "TGA"]
+    for codon in stop_codons:
+        sequence = sequence.replace(codon, "")
+    return sequence
+
+# Function to extract unique protein-coding genes and save them to all_genes.fasta
+def extract_and_save_protein_coding_genes(genbank_file, output_fasta):
+    unique_genes = set()
+    gene_records = []
+
+    for record in SeqIO.parse(genbank_file, "genbank"):
+        for feature in record.features:
+            if feature.type == "CDS":
+                if "gene" in feature.qualifiers:
+                    gene_name = feature.qualifiers["gene"][0]
+                    if gene_name not in unique_genes:
+                        unique_genes.add(gene_name)
+                        gene_seq = feature.location.extract(record).seq
+                        gene_record = SeqRecord(gene_seq, id=gene_name, description="")
+                        gene_records.append(gene_record)
+
+    SeqIO.write(gene_records, output_fasta, "fasta")
+
+    return gene_records
+
+# Provide the path to your GenBank file
+genbank_file = "S1.gb"
+
+# Output file for all extracted genes
+all_genes_output_fasta = "all_genes.fasta"
+
+# Extract and save protein-coding genes to all_genes.fasta
+gene_records = extract_and_save_protein_coding_genes(genbank_file, all_genes_output_fasta)
+
+# Concatenate gene sequences, remove stop codons, and save as concatenated.fasta
+concatenated_sequence = ""
+for record in gene_records:
+    concatenated_sequence += str(record.seq)
+
+# Remove stop codons from the concatenated sequence
+concatenated_sequence_no_stop = remove_stop_codons(concatenated_sequence)
+
+# Write the concatenated sequence without stop codons to a file
+concatenated_output_fasta = "concatenated.fasta"
+with open(concatenated_output_fasta, "w") as output_handle:
+    output_handle.write(">Concatenated_Protein_Coding_Sequences\n")
+    output_handle.write(concatenated_sequence_no_stop)
+
+print("All extracted protein-coding genes have been written to", all_genes_output_fasta)
+print("Concatenated nucleotide sequences of protein-coding genes with stop codons removed have been written to", concatenated_output_fasta)
+
+#end of script
+
+(bash)
+$ module load python
+$ python3 extract_cds.py
+
+******************************************************************************************
+
+5. Using codonW for Codon Usage Analysis
+(bash)
+$ conda activate codonw
+$codonw path/to/cds.fasta /path_out/to/result.out  
+
+******************************************************************************************
+
+6. Rcode used for the regression analysis between ecological factors and haplotype diversity
+## Loading the excel file
+(R)
+library(readxl)
+Ecological_data <- read_excel("Ecological-data.xlsx")
+View(Ecological_data)
+
+# Define the min-max normalization function
+min_max_normalize <- function(x) {
+  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+
+# Apply normalization to the variables
+normalized_data <- Ecological_data
+variables <- c("Temperature", "Precipitation", "pH", "Organic_Carbon", "Nitrogen", "Altitude")
+normalized_data[variables] <- lapply(normalized_data[variables], min_max_normalize)
+
+# View normalized data
+head(normalized_data)
+
+#Generalized Linear Model
+glm_model <- glm(Haplotype ~ pH + Organic_Carbon + Nitrogen + Altitude + Precipitation + Temperature, 
+                 data = normalized_data, 
+                 family = gaussian(link = "identity")) # For continuous response
+summary(glm_model)
+
+#Multinomial regression
+# Ensure Haplotype is treated as a categorical variable
+normalized_data$Haplotype <- as.factor(normalized_data$Haplotype)
+
+# Load the nnet package
+library(nnet)
+
+# Fit the multinomial logistic regression
+multinom_model <- multinom(Haplotype ~ Altitude + Nitrogen + pH + Organic_Carbon + Precipitation + Temperature, 
+                           data = normalized_data)
+
+# Summary of the model
+summary(multinom_model)
+
+# Check coefficients
+coef(multinom_model)
+
+# Predicted probabilities
+predicted_probs <- predict(multinom_model, type = "probs")
+head(predicted_probs)
+
+# Predict the most probable haplotype for each observation
+predicted_haplotypes <- predict(multinom_model, type = "class")
+predicted_haplotypes
+
+# Add the predicted haplotypes as a new column to the normalized_data
+normalized_data$Predicted_Haplotype <- predicted_haplotypes
+
+# View the updated dataset
+head(normalized_data)
+normalized_data
+
+#Multinomial regression
+# Ensure Haplotype is treated as a categorical variable
+normalized_data$Haplotype <- as.factor(normalized_data$Haplotype)
+
+# Fit the multinomial logistic regression
+multinom_model <- multinom(Haplotype ~ Altitude + Nitrogen + pH + Organic_Carbon + Precipitation + Temperature, 
+                           data = normalized_data)
+
+# Summary of the model
+summary(multinom_model)
+
+# Check coefficients
+coef(multinom_model)
+
+# Extract coefficients and standard errors
+coef_summary <- summary(multinom_model)
+z_scores <- coef_summary$coefficients / coef_summary$standard.errors
+p_values <- 2 * (1 - pnorm(abs(z_scores)))
+
+# Print p-values for each predictor
+p_values
+
+# Predict haplotype probabilities for the dataset
+predicted_probs <- predict(multinom_model, type = "probs")
+
+# View the predicted probabilities
+head(predicted_probs)
+
+# Predict the most probable haplotype for each observation
+predicted_haplotypes <- predict(multinom_model, type = "class")
+predicted_haplotypes
+normalized_data$Haplotype
+
+# Add the predicted haplotypes as a new column to the normalized_data
+normalized_data$Predicted_Haplotype <- predicted_haplotypes
+
+# View the updated dataset
+head(normalized_data)
+
+# Create confusion matrix
+conf_matrix <- table(normalized_data$Haplotype, normalized_data$Predicted_Haplotype)
+
+conf_matrix
+
+# Calculate false positives for each class
+false_positives <- apply(conf_matrix, 2, sum) - diag(conf_matrix)
+
+# Calculate False Positives (FP) and False Negatives (FN)
+false_positives <- apply(conf_matrix, 2, sum) - diag(conf_matrix) # Column sums minus diagonal
+false_negatives <- apply(conf_matrix, 1, sum) - diag(conf_matrix) # Row sums minus diagonal
+
+
+# Calculate total instances
+total_instances <- sum(conf_matrix)
+
+# Calculate correctly classified instances (sum of diagonal)
+correct_classifications <- sum(diag(conf_matrix))
+
+# Calculate misclassified instances
+misclassifications <- total_instances - correct_classifications
+
+# Calculate error rate
+error_rate <- misclassifications / total_instances * 100
+
+# Display results
+cat("Error Rate:", error_rate, "%\n")
+
+******************************************************************************************
+
