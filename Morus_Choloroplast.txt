@@ -117,8 +117,8 @@ $codonw path/to/cds.fasta /path_out/to/result.out
 ******************************************************************************************
 
 7. Rcode used for the regression analysis between ecological factors and haplotype diversity
-## Loading the excel file
 (R)
+## Loading the excel file
 library(readxl)
 Ecological_data <- read_excel("Ecological-data.xlsx")
 View(Ecological_data)
